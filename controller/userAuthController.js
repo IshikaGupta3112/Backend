@@ -1,15 +1,14 @@
-const User = require("../model/loginSignup");
+const User = require("../model/userAuthModel");
 const nodemailer = require("nodemailer");
 const sendgridTransport = require("nodemailer-sendgrid-transport");
 const createError = require("http-errors");
 const {
-  authSchema,
+  signupSchema,
   loginSchema,
   sendOtpSchema,
   otpVerifySchema,
   resetPassSchema,
 } = require("../helpers/validation");
-const { signAccessToken } = require("../helpers/jwt");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
@@ -22,15 +21,32 @@ const transporter = nodemailer.createTransport(
   })
 );
 
+async function refreshToken(req , res , next){
+try{
+const refreshToken = req.body.refreshToken;
+if(!refreshToken) throw createError.BadRequest("Please Provide refreshToken");
+jwt.verify(refreshToken , process.env.REFRESH_TOKEN_SECRET , (err , payload)=>{
+  if(err) throw createError.Unauthorized()
+  const userId = payload._id
+  const accessToken =  jwt.sign({ _id: userId}, process.env.ACCESS_TOKEN_SECRET, { expiresIn: "60s" });
+  const refreshToken =  jwt.sign({ _id: userId }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: "1y" });
+  return res.json({accessToken, refreshToken})
+})
+}
+catch(err){
+res.json({err:err})
+}
+}
+
 async function userSignup(req, res, next) {
   try {
-    const Result = await authSchema.validateAsync(req.body);
+    const Result = await signupSchema.validateAsync(req.body);
     const existUser = await User.findOne({ email: Result.email.toLowerCase() });
     if (existUser)
       throw createError.Conflict("User with this mail already exists");
     const hashedPassword = await bcrypt.hash(Result.password, 12);
     const user = new User({
-      name: Result.name,
+      username: Result.username,
       email: Result.email,
       password: hashedPassword,
     });
@@ -70,11 +86,12 @@ async function userLogin(req, res, next) {
     const isExist = await User.findOne({ email: Result.email });
     if (!isExist) throw createError.NotFound("User doesn't exist");
     const doMatch = await bcrypt.compare(Result.password, isExist.password);
-    const accessToken = await signAccessToken(isExist.id);
+    const accessToken =  jwt.sign({ _id: isExist.id }, process.env.ACCESS_TOKEN_SECRET, { expiresIn: "60s" });
+    const refreshToken =  jwt.sign({ _id: isExist.id }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: "1y" });
     if (doMatch)
       return res
         .status(200)
-        .json({ msg: "Login Successful", accessToken: accessToken });
+        .json({ msg: "Login Successful", accessToken: accessToken , refreshToken:refreshToken });
     throw createError.Unauthorized("Invalid Credentials");
   } catch (error) {
     if (error.isJoi === true) error.status = 422;
@@ -135,7 +152,8 @@ async function signupOtpVerify(req, res, next) {
   try {
     const Result = await otpVerifySchema.validateAsync(req.body);
     const isExist = await User.findOne({ email: Result.email });
-    const accessToken = await signAccessToken(isExist.id);
+    const accessToken =  jwt.sign({ _id: isExist.id }, process.env.ACCESS_TOKEN_SECRET, { expiresIn: "60s" });
+    const refreshToken =  jwt.sign({ _id: isExist.id }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: "1y" });
     if (!isExist) {
       throw createError.Conflict("User doesn't exist");
     } else if (isExist.otpExpiry <= Date.now()) {
@@ -144,7 +162,7 @@ async function signupOtpVerify(req, res, next) {
       if (isExist.otp === Result.otp)
         return res
           .status(200)
-          .json({ msg: "Correct Otp", accessToken: accessToken });
+          .json({ msg: "Correct Otp", accessToken: accessToken , refreshToken:refreshToken});
       else {
         throw createError.Forbidden("Incorrect Otp");
       }
@@ -186,6 +204,7 @@ async function resetPass(req, res, next) {
 }
 
 module.exports = {
+  refreshToken ,
   userSignup,
   userLogin,
   sendOtp,

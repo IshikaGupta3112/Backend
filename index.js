@@ -5,7 +5,8 @@ require("dotenv").config();
 const app = express();
 const { connectToMongoDB } = require("./helpers/connection");
 const userRoute = require("./routes/user");
-const { verifyAccessToken } = require("./helpers/jwt");
+const sellerRoute = require("./routes/seller");
+const verifyAccessToken = require("./helpers/jwt");
 
 const PORT = process.env.PORT || 3000;
 
@@ -19,12 +20,13 @@ connectToMongoDB("mongodb://localhost:27017/auth")
 
 app.use(express.json());
 
-app.get("/", verifyAccessToken, async (req, res, next) => {
-  console.log(req.headers["authorization"]);
+app.get("/" ,verifyAccessToken ,  async (req, res, next) => {
   res.send("hello");
 });
 
 app.use("/user", userRoute);
+
+app.use("/seller", sellerRoute);
 
 app.use(async (req, res, next) => {
   next(createError.NotFound("this route is not found"));
